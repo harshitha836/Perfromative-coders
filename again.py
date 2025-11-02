@@ -30,6 +30,15 @@ if "destination_list" not in st.session_state:
 if "weather_forecast" not in st.session_state:
     st.session_state.weather_forecast = ""
 
+if "disaster_risk" not in st.session_state:
+    st.session_state.disaster_risk = ""
+
+if "trip_country" not in st.session_state:
+    st.session_state.trip_country = ""
+
+if "trip_duration" not in st.session_state:
+    st.session_state.trip_duration = ""
+
 # ---------------- Display previous messages ----------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -66,14 +75,6 @@ if os.path.exists(excel_path) and not st.session_state.destination_list:
     st.session_state.destination_list = f"Here is the list of travel destinations supported:\n{dest_text}"
     st.info("Destination list loaded!")
 
-# ---------------- Load Weather Forecast ----------------
-if not st.session_state.weather_forecast:
-    st.session_state.weather_forecast = (
-        "🌦️ Singapore's weather in November 2025 is expected to be warm and wet, with frequent thundery showers "
-        "especially in the afternoons and occasional gusty winds from Sumatra squalls. Temperatures will range from 33°C to 35°C. "
-        "Rainfall is forecast to be below average, but travelers should still prepare for wet conditions on most days."
-    )
-
 # ---------------- Initial Friendly Prompt ----------------
 if not st.session_state.messages:
     intro = (
@@ -82,10 +83,8 @@ if not st.session_state.messages:
         "- Where you're headed\n"
         "- Your age\n"
         "- How long you'll be away\n"
-        "- Whether you plan to rent a vehicle\n"
-        "- And if you'd like to check past natural disaster history for your destination\n\n"
-        "I'll also factor in the latest weather forecast to help you choose the best coverage. Here's what I found:\n\n"
-        f"{st.session_state.weather_forecast}"
+        "- Whether you plan to rent a vehicle\n\n"
+        "Once I know your destination and trip duration, I’ll also check the latest weather and risk forecast to help you choose the best coverage."
     )
     st.chat_message("assistant").markdown(intro)
     st.session_state.messages.append({"role": "assistant", "content": intro})
@@ -95,6 +94,44 @@ if prompt := st.chat_input("Tell me about your trip..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
+    # Try to extract destination and duration from user input
+    if "to" in prompt.lower():
+        words = prompt.lower().split()
+        if "to" in words:
+            idx = words.index("to")
+            if idx + 1 < len(words):
+                st.session_state.trip_country = words[idx + 1].capitalize()
+
+    if "day" in prompt.lower():
+        for word in prompt.split():
+            if word.isdigit():
+                st.session_state.trip_duration = word
+                break
+
+    # Inject weather and disaster risk if destination and duration are known
+    if st.session_state.trip_country and st.session_state.trip_duration:
+        country = st.session_state.trip_country.lower()
+        duration = st.session_state.trip_duration
+
+        # Simulated weather and disaster risk logic
+        high_risk_countries = ["philippines", "indonesia", "india", "bangladesh", "vietnam", "thailand", "singapore"]
+        if country in high_risk_countries:
+            st.session_state.weather_forecast = (
+                f"🌧️ {country.title()} is forecast to experience heavy rainfall and possible flooding during your {duration}-day trip. "
+                "Thunderstorms and tropical weather systems are common this time of year."
+            )
+            st.session_state.disaster_risk = (
+                f"⚠️ {country.title()} has elevated flood and storm risk during this season. "
+                "We recommend adding flood protection and emergency evacuation coverage to your travel insurance."
+            )
+        else:
+            st.session_state.weather_forecast = (
+                f"🌤️ {country.title()} is expected to have moderate weather during your {duration}-day trip. "
+                "No major weather alerts are currently in place."
+            )
+            st.session_state.disaster_risk = ""
+
+    # Prepare messages for Groq
     messages_for_groq = st.session_state.messages.copy()
 
     # Inject uploaded PDF content
@@ -119,27 +156,34 @@ if prompt := st.chat_input("Tell me about your trip..."):
         })
 
     # Inject weather forecast
-    messages_for_groq.insert(0, {
-        "role": "system",
-        "content": f"Latest weather forecast:\n{st.session_state.weather_forecast}"
-    })
+    if st.session_state.weather_forecast:
+        messages_for_groq.insert(0, {
+            "role": "system",
+            "content": f"Latest weather forecast for {st.session_state.trip_country} during the user's {st.session_state.trip_duration}-day trip:\n{st.session_state.weather_forecast}"
+        })
+
+    # Inject disaster risk only if relevant
+    if st.session_state.disaster_risk:
+        messages_for_groq.insert(0, {
+            "role": "system",
+            "content": f"Disaster risk advisory:\n{st.session_state.disaster_risk}"
+        })
 
     # System instructions
     messages_for_groq.insert(0, {
         "role": "system",
         "content": (
             "You are a friendly travel insurance advisor. Only answer questions related to travel insurance. "
-            "Use the provided policy documents, destination list, and weather forecast to guide your responses. "
+            "Use the provided policy documents, destination list, weather forecast, and disaster risk to guide your responses. "
             "Prompt the user for:\n"
             "- Destination, age, and trip duration\n"
-            "- Whether they plan to rent a vehicle\n"
-            "- If they want to check past natural disaster history\n\n"
-            "Based on their answers, suggest relevant insurance policies from Scootsurance or TravelEasy. "
+            "- Whether they plan to rent a vehicle\n\n"
             "Once they choose a policy, recommend useful add-ons like hospital income, rental car coverage, or COVID-19 benefits. "
+            "If the destination has high flood or disaster risk, automatically suggest flood protection and emergency evacuation coverage. "
             "If the user declines add-ons, gently follow up with:\n"
             "'Are you sure? These extras can really help if things don’t go as planned.'\n"
             "If they still say no, respect their choice and proceed with confirming their selected coverage.\n\n"
-            "Keep the tone warm, conversational, and helpful throughout."
+            "Only mention disaster risk if relevant. Keep the tone warm, conversational, and helpful throughout."
         )
     })
 
